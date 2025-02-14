@@ -346,12 +346,47 @@ function speak_impl(voice_Connection, mapKey) {
   });
 }
 
+const fs = require('fs');
+const TRANSCRIPTION_FILE = './transcriptions.txt'; // Keep transcription log
+const bannedWords = ['badword1', 'badword2', 'slur']; // Add words to filter
+const userViolations = new Map();
+
 function process_commands_query(txt, mapKey, user) {
     if (txt && txt.length) {
         let val = guildMap.get(mapKey);
-        val.text_Channel.send(user.username + ': ' + txt)
+        const transcription = `${new Date().toISOString()} - ${user.username}: ${txt}\n`;
+
+        // Append transcription to a file
+        fs.appendFile(TRANSCRIPTION_FILE, transcription, (err) => {
+            if (err) console.error("Error writing transcription to file:", err);
+        });
+
+        // Send message to the Discord text channel
+        val.text_Channel.send(`${user.username}: ${txt}`);
+
+        // 🔍 Check for banned words
+        if (bannedWords.some(word => txt.toLowerCase().includes(word))) {
+            val.text_Channel.send(`⚠️ Warning ${user.username}, inappropriate language is not allowed!`);
+
+            // Track user violations
+            if (!userViolations.has(user.id)) {
+                userViolations.set(user.id, 1);
+            } else {
+                userViolations.set(user.id, userViolations.get(user.id) + 1);
+            }
+
+            let member = val.voice_Channel.guild.members.cache.get(user.id);
+            if (member) {
+                if (userViolations.get(user.id) >= 3) { // Auto-kick after 3 violations
+                    member.voice.disconnect();
+                    val.text_Channel.send(`🔨 ${user.username} has been removed from voice chat for repeated violations.`);
+                    userViolations.delete(user.id); // Reset count after kick
+                }
+            }
+        }
     }
 }
+
 
 
 //////////////////////////////////////////
@@ -439,6 +474,32 @@ async function transcribe_gspeech(buffer) {
   } catch (e) { console.log('transcribe_gspeech 368:' + e) }
 }
 
+const express = require('express');
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Middleware to parse JSON
+app.use(express.json());
+
+// Home route
+app.get('/', (req, res) => {
+    res.send('Discord Moderation Bot is running!');
+});
+
+// Endpoint to get bot status
+app.get('/status', (req, res) => {
+    res.json({
+        status: "online",
+        uptime: process.uptime(),
+        guilds: discordClient.guilds.cache.size,
+        users: discordClient.users.cache.size
+    });
+});
+
+// Start the web server
+app.listen(PORT, () => {
+    console.log(`Web server running on http://localhost:${PORT}`);
+});
 //////////////////////////////////////////
 //////////////////////////////////////////
 //////////////////////////////////////////
